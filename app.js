@@ -1,3 +1,10 @@
+// Load html2canvas dynamically to bypass canvas taint and font rendering issues
+if (!window.html2canvas) {
+  const script = document.createElement('script');
+  script.src = 'https://cdnjs.cloudflare.com/ajax/libs/html2canvas/1.4.1/html2canvas.min.js';
+  document.head.appendChild(script);
+}
+
 document.body.innerHTML = `
   <style>
     @font-face {
@@ -228,77 +235,62 @@ function updateFlag() {
   }
 }
 
-async function renderDisplayToCanvas() {
+// Helper function to capture the display box using html2canvas
+async function captureDisplayCanvas() {
   const outputEl = document.getElementById('output');
-  const width = outputEl.clientWidth || 400;
-  const height = outputEl.clientHeight || 220;
-
-  const canvas = document.createElement('canvas');
-  canvas.width = width * 2;
-  canvas.height = height * 2;
-  const ctx = canvas.getContext('2d');
-  ctx.scale(2, 2);
-
-  ctx.fillStyle = '#ffffff';
-  ctx.fillRect(0, 0, width, height);
-
-  const svgData = `
-    <svg xmlns="http://www.w3.org/2000/svg" width="${width}" height="${height}">
-      <foreignObject width="100%" height="100%">
-        <div xmlns="http://www.w3.org/1999/xhtml" style="
-          font-family: 'CatrinityFlags', sans-serif;
-          font-size: 140px;
-          line-height: 1;
-          display: flex;
-          align-items: center;
-          justify-content: center;
-          width: 100%;
-          height: 100%;
-          background: white;
-        ">
-          ${outputEl.innerHTML}
-        </div>
-      </foreignObject>
-    </svg>
-  `;
-
-  const img = new Image();
-  const svgBlob = new Blob([svgData], { type: 'image/svg+xml;charset=utf-8' });
-  const url = URL.createObjectURL(svgBlob);
-
-  return new Promise((resolve) => {
-    img.onload = () => {
-      ctx.drawImage(img, 0, 0);
-      URL.revokeObjectURL(url);
-      resolve(canvas);
-    };
-    img.src = url;
-  });
+  if (window.html2canvas) {
+    return await html2canvas(outputEl, {
+      backgroundColor: '#ffffff',
+      scale: 2,
+      useCORS: true,
+      logging: false
+    });
+  }
+  throw new Error('html2canvas library is still loading. Please try again.');
 }
+
+// Download PNG Action
+document.getElementById('downloadBtn').addEventListener('click', async () => {
+  try {
+    const canvas = await captureDisplayCanvas();
+    const link = document.createElement('a');
+    link.download = 'flag-composition.png';
+    link.href = canvas.toDataURL('image/png');
+    link.click();
+  } catch (err) {
+    console.error('Download error:', err);
+    alert(err.message || 'Export failed.');
+  }
+});
+
+// Copy Image to Clipboard Action
+document.getElementById('copyImgBtn').addEventListener('click', () => {
+  if (!navigator.clipboard || !window.ClipboardItem) {
+    alert('Clipboard API not supported in this browser environment.');
+    return;
+  }
+
+  // Pass a Promise directly into ClipboardItem to preserve user-gesture permission
+  const item = new ClipboardItem({
+    'image/png': (async () => {
+      const canvas = await captureDisplayCanvas();
+      return new Promise((resolve, reject) => {
+        canvas.toBlob((blob) => {
+          if (blob) resolve(blob);
+          else reject(new Error('Failed to create image blob'));
+        }, 'image/png');
+      });
+    })()
+  });
+
+  navigator.clipboard.write([item])
+    .then(() => alert('Flag image copied to clipboard!'))
+    .catch((err) => {
+      console.error('Clipboard copy error:', err);
+      alert('Clipboard copy failed. Try using Download PNG instead.');
+    });
+});
 
 const inputEl = document.getElementById('code');
 inputEl.addEventListener('input', updateFlag);
 updateFlag();
-
-document.getElementById('downloadBtn').addEventListener('click', async () => {
-  const canvas = await renderDisplayToCanvas();
-  const link = document.createElement('a');
-  link.download = 'flag-composition.png';
-  link.href = canvas.toDataURL('image/png');
-  link.click();
-});
-
-document.getElementById('copyImgBtn').addEventListener('click', async () => {
-  const canvas = await renderDisplayToCanvas();
-  canvas.toBlob(async (blob) => {
-    try {
-      await navigator.clipboard.write([
-        new ClipboardItem({ 'image/png': blob })
-      ]);
-      alert('Flag image copied to clipboard!');
-    } catch (err) {
-      console.error('Copy failed:', err);
-      alert('Clipboard copy not supported on this browser context.');
-    }
-  }, 'image/png');
-});
